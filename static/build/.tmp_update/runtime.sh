@@ -57,7 +57,17 @@ main() {
 
     cd $sysdir
     bootScreen "Boot"
+    
+    # Set filebrowser branding to "Onion" and apply custom theme
+    if [ -f "$sysdir/config/filebrowser/first.run" ]; then
+        $sysdir/bin/filebrowser config set --branding.name "Onion" -d $sysdir/config/filebrowser/filebrowser.db
+        $sysdir/bin/filebrowser config set --branding.files "$sysdir/config/filebrowser/theme" -d $sysdir/config/filebrowser/filebrowser.db
 
+        rm "$sysdir/config/filebrowser/first.run"
+    fi
+
+    start_networking
+    
     # Start the key monitor
     keymon &
 
@@ -81,17 +91,10 @@ main() {
     # Bind arcade name library to customer path
     mount -o bind $miyoodir/lib/libgamename.so /customer/lib/libgamename.so
 
-    # Set filebrowser branding to "Onion" and apply custom theme
-    if [ -f "$sysdir/config/filebrowser/first.run" ]; then
-        $sysdir/bin/filebrowser config set --branding.name "Onion" -d $sysdir/config/filebrowser/filebrowser.db
-        $sysdir/bin/filebrowser config set --branding.files "$sysdir/config/filebrowser/theme" -d $sysdir/config/filebrowser/filebrowser.db
 
-        rm "$sysdir/config/filebrowser/first.run"
-    fi
-
-    start_networking
     rm -rf /tmp/is_booting
 
+	sh /mnt/SDCARD/App/Syncthing/script/checkrun.sh #SYNCTHING INJECTOR #SYNCTHING INJECTOR
     # Auto launch
     if [ ! -f $sysdir/config/.noAutoStart ]; then
         state_change check_game
@@ -619,6 +622,8 @@ start_networking() {
 }
 
 check_networking() {
+    libpadspblocker &
+    
     if [ $DEVICE_ID -ne $MODEL_MMP ] || [ ! -f /tmp/network_changed ] && [ -f /tmp/ntp_synced ]; then
         check_timezone
         return
@@ -647,6 +652,23 @@ check_installer() {
         reboot
         sleep 10
         exit
+    fi
+}
+
+# utility function to block a preload on the wpa_supp and udhcpc
+libpadspblocker() { 
+    wpa_pid=$(ps -e | grep "[w]pa_supplicant" | awk 'NR==1{print $1}')
+    udhcpc_pid=$(ps -e | grep "[u]dhcpc" | awk 'NR==1{print $1}')
+    if [ -n "$wpa_pid" ] && [ -n "$udhcpc_pid" ]; then
+        if grep -q "libpadsp.so" /proc/$wpa_pid/maps || grep -q "libpadsp.so" /proc/$udhcpc_pid/maps; then
+            echo "Network Checker: $wpa_pid(WPA) and $udhcpc_pid(UDHCPC) found preloaded with libpadsp.so"
+            unset LD_PRELOAD
+            killall -9 wpa_supplicant
+            killall -9 udhcpc 
+            $miyoodir/app/wpa_supplicant -B -D nl80211 -iwlan0 -c /appconfigs/wpa_supplicant.conf & 
+            udhcpc -i wlan0 -s /etc/init.d/udhcpc.script &
+            echo "Network Checker: Removing libpadsp.so preload on wpa_supp/udhcpc"
+        fi
     fi
 }
 
